@@ -46,41 +46,30 @@ function ENT:SetLines(data)
     net.Broadcast()
 end
 
-function ENT:UpdateText(ply, data)
+function ENT:UpdateText(ply, data, skipRateLimit)
     if not IsValid(ply) or not self:CanModify(ply) then return end
     
-    local canUpdate, message = rText.CanPlayerUpdate(ply)
-    if not canUpdate then
-        ply:ChatPrint(message)
-        return
-    end
-
-    -- Validate text length
-    for i, line in pairs(data.lines) do
-        if line.text then
-            data.lines[i].text = string.sub(line.text, 1, rText.Config.Cache.maxTextLength)
+    -- Skip rate limit check for initial settings
+    if not skipRateLimit then
+        local canUpdate, message = rText.CanPlayerUpdate(ply)
+        if not canUpdate then
+            ply:ChatPrint(message)
+            return
         end
     end
 
-    -- Respect feature toggles
-    if not rText.Config.Cache.effectsEnabled then
-        data.effect = "none"
-    end
-
-    if not rText.Config.Cache.rainbowEnabled then
-        data.rainbow = false
-    end
-
-    if not rText.Config.Cache.permanentEnabled then
-        data.permanent = false
-    end
-    
     local newData = {}
+    local maxLines = rText.Config.Cache.maxLines or 8
+    local lineCount = 0
+    
     -- Convert the flat data structure to line-based structure
     for i = 1, 8 do
+        if lineCount >= maxLines then break end
+        
         if data.lines[i] and data.lines[i].text ~= "" then
+            lineCount = lineCount + 1
             table.insert(newData, {
-                text = string.sub(data.lines[i].text, 1, 128),
+                text = string.sub(data.lines[i].text, 1, rText.Config.Cache.maxTextLength),
                 size = data.lines[i].size or 30,
                 color = data.color,
                 font = data.font,
@@ -94,6 +83,19 @@ function ENT:UpdateText(ply, data)
                 spacing = data.spacing
             })
         end
+    end
+    
+    -- Respect feature toggles
+    if not rText.Config.Cache.effectsEnabled then
+        data.effect = "none"
+    end
+
+    if not rText.Config.Cache.rainbowEnabled then
+        data.rainbow = false
+    end
+
+    if not rText.Config.Cache.permanentEnabled then
+        data.permanent = false
     end
     
     self:SetLines(newData)

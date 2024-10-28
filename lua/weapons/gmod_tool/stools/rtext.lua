@@ -80,8 +80,9 @@ local function GetPlayerSettings(ply)
         spacing = ply:GetInfoNum("rtext_spacing", 1)
     }
 
-    -- Get text and size for each line
-    for i = 1, 8 do
+    -- Get text and size for each line, respecting max lines
+    local maxLines = rText.Config.Cache.maxLines or 8
+    for i = 1, maxLines do
         local text = ply:GetInfo("rtext_line" .. i)
         if text and text ~= "" then
             settings.lines[i] = {
@@ -114,8 +115,8 @@ local function CreateTextScreen(ply, tr, ang)
         textScreen:Spawn()
         textScreen:SetCreator(ply)
         
-        -- Apply initial settings
-        textScreen:UpdateText(ply, GetPlayerSettings(ply))
+        -- Apply initial settings, bypassing rate limit
+        textScreen:UpdateText(ply, GetPlayerSettings(ply), true)
 
         -- Undo registration
         undo.Create("rText Screen")
