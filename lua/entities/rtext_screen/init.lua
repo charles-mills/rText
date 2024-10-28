@@ -49,16 +49,49 @@ end
 function ENT:UpdateText(ply, data)
     if not IsValid(ply) or not self:CanModify(ply) then return end
     
+    local canUpdate, message = rText.CanPlayerUpdate(ply)
+    if not canUpdate then
+        ply:ChatPrint(message)
+        return
+    end
+
+    -- Validate text length
+    for i, line in pairs(data.lines) do
+        if line.text then
+            data.lines[i].text = string.sub(line.text, 1, rText.Config.Cache.maxTextLength)
+        end
+    end
+
+    -- Respect feature toggles
+    if not rText.Config.Cache.effectsEnabled then
+        data.effect = "none"
+    end
+
+    if not rText.Config.Cache.rainbowEnabled then
+        data.rainbow = false
+    end
+
+    if not rText.Config.Cache.permanentEnabled then
+        data.permanent = false
+    end
+    
     local newData = {}
     -- Convert the flat data structure to line-based structure
     for i = 1, 8 do
-        if data.lines[i] and data.lines[i] ~= "" then
+        if data.lines[i] and data.lines[i].text ~= "" then
             table.insert(newData, {
-                text = string.sub(data.lines[i], 1, 128),
+                text = string.sub(data.lines[i].text, 1, 128),
+                size = data.lines[i].size or 30,
                 color = data.color,
-                size = data.size,
                 font = data.font,
-                rainbow = data.rainbow and 1 or 0
+                rainbow = data.rainbow and 1 or 0,
+                effect = data.effect,
+                effect_speed = data.effect_speed,
+                glow = data.glow,
+                outline = data.outline,
+                three_d = data.three_d,
+                align = data.align,
+                spacing = data.spacing
             })
         end
     end
