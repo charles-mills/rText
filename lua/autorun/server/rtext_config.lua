@@ -64,6 +64,22 @@ end
 -- Initial cache update
 UpdateCache()
 
+-- Create a table to track last spawn times
+rText.LastSpawns = setmetatable({}, {__mode = "k"})
+
+-- Add spawn timing check function
+function rText.CanPlayerSpawnNow(ply)
+    if not IsValid(ply) then return false end
+    
+    local lastSpawn = rText.LastSpawns[ply] or 0
+    if CurTime() - lastSpawn < rText.Config.Cache.waitTime then
+        return false, string.format("Please wait %.1f seconds before spawning another text screen", 
+            rText.Config.Cache.waitTime - (CurTime() - lastSpawn))
+    end
+    
+    return true
+end
+
 -- Permission checking function
 function rText.CanPlayerSpawn(ply)
     if not IsValid(ply) then return false end
