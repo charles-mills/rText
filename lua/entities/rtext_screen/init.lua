@@ -13,19 +13,21 @@ function ENT:Initialize()
     self:SetSolid(SOLID_VPHYSICS)
     self:SetUseType(SIMPLE_USE)
     
-    -- Make it invisible but keep collisions
-    self:SetRenderMode(RENDERMODE_NONE)
-    self:SetColor(Color(0, 0, 0, 0))
-
+    self:SetRenderMode(RENDERMODE_TRANSALPHA)
+    self:SetMaterial("models/effects/vol_light001")
+    self:DrawShadow(false)
+    
     -- Initialize default values
-    self.TextData = {
-        lines = {},
-        font = "Roboto",
-        size = 30,
-        color = Color(255, 255, 255, 255),
-        rainbow = false,
-        permanent = false
-    }
+    self.TextData = {}
+    self:SetLines({
+        {
+            text = "Sample Text",
+            color = Color(255, 255, 255, 255),
+            size = 30,
+            font = "Roboto",
+            rainbow = 0
+        }
+    })
 
     local phys = self:GetPhysicsObject()
     if IsValid(phys) then
@@ -34,24 +36,9 @@ function ENT:Initialize()
     end
 end
 
-function ENT:UpdateText(ply, data)
-    if not IsValid(ply) or not self:CPPICanUse(ply) then return end
-    
-    -- Validate and sanitize input
-    data.lines = data.lines or {}
-    for i = 1, 8 do
-        data.lines[i] = string.sub(data.lines[i] or "", 1, 128)
-    end
-    
-    data.font = data.font or "Roboto"
-    data.size = math.Clamp(data.size or 30, 10, 100)
-    data.color = data.color or Color(255, 255, 255, 255)
-    data.rainbow = data.rainbow or false
-    data.permanent = data.permanent or false
-
-    -- Update the entity's data
+function ENT:SetLines(data)
     self.TextData = data
-
+    
     -- Network the changes to clients
     net.Start("rText_Update")
         net.WriteEntity(self)
@@ -59,15 +46,67 @@ function ENT:UpdateText(ply, data)
     net.Broadcast()
 end
 
+function ENT:UpdateText(ply, data)
+    if not IsValid(ply) or not self:CanModify(ply) then return end
+    
+    local canUpdate, message = rText.CanPlayerUpdate(ply)
+    if not canUpdate then
+        ply:ChatPrint(message)
+        return
+    end
+
+    -- Validate text length
+    for i, line in pairs(data.lines) do
+        if line.text then
+            data.lines[i].text = string.sub(line.text, 1, rText.Config.Cache.maxTextLength)
+        end
+    end
+
+    -- Respect feature toggles
+    if not rText.Config.Cache.effectsEnabled then
+        data.effect = "none"
+    end
+
+    if not rText.Config.Cache.rainbowEnabled then
+        data.rainbow = false
+    end
+
+    if not rText.Config.Cache.permanentEnabled then
+        data.permanent = false
+    end
+    
+    local newData = {}
+    -- Convert the flat data structure to line-based structure
+    for i = 1, 8 do
+        if data.lines[i] and data.lines[i].text ~= "" then
+            table.insert(newData, {
+                text = string.sub(data.lines[i].text, 1, 128),
+                size = data.lines[i].size or 30,
+                color = data.color,
+                font = data.font,
+                rainbow = data.rainbow and 1 or 0,
+                effect = data.effect,
+                effect_speed = data.effect_speed,
+                glow = data.glow,
+                outline = data.outline,
+                three_d = data.three_d,
+                align = data.align,
+                spacing = data.spacing
+            })
+        end
+    end
+    
+    self:SetLines(newData)
+end
+
 -- Handle incoming update requests
 net.Receive("rText_RequestUpdate", function(_, ply)
     local ent = net.ReadEntity()
     if not IsValid(ent) or ent:GetClass() ~= "rtext_screen" then return end
     
-    -- Send the current text data to the requesting client
     net.Start("rText_Update")
         net.WriteEntity(ent)
-        net.WriteTable(ent.TextData)
+        net.WriteTable(ent.TextData or {})
     net.Send(ply)
 end)
 
@@ -77,7 +116,7 @@ function ENT:Save()
         TextData = self.TextData,
         Pos = self:GetPos(),
         Ang = self:GetAngles(),
-        Creator = self:CPPIGetOwner():SteamID64()
+        Creator = IsValid(self:GetCreator()) and self:GetCreator():SteamID64() or nil
     }
     return data
 end
@@ -92,4 +131,21 @@ function ENT:Load(data)
         net.WriteEntity(self)
         net.WriteTable(self.TextData)
     net.Broadcast()
+end
+
+-- Cross-gamemode ownership check
+function ENT:CanModify(ply)
+    if not IsValid(ply) then return false end
+    local owner = self:GetCreator()
+    return not IsValid(owner) or owner == ply or ply:IsAdmin()
+end
+
+-- Set the creator of the entity
+function ENT:SetCreator(ply)
+    self:SetNWEntity("Creator", ply)
+end
+
+-- Get the creator of the entity
+function ENT:GetCreator()
+    return self:GetNWEntity("Creator")
 end
