@@ -261,7 +261,7 @@ local renderQueue = {}
 local lastQueueProcess = 0
 local QUEUE_PROCESS_INTERVAL = 0.016 -- ~60fps
 
-function rText.Render.ProcessRenderQueue()
+local function ProcessRenderQueue()
     local curTime = CurTime()
     if curTime - lastQueueProcess < QUEUE_PROCESS_INTERVAL then return end
     lastQueueProcess = curTime
@@ -363,7 +363,7 @@ end
 
 -- Hook into rendering system
 hook.Add("PostDrawTranslucentRenderables", "rText_Render", function()
-    rText.Render.ProcessRenderQueue()
+    ProcessRenderQueue()
 end)
 
 -- Add entity to render queue

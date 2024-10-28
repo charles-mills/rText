@@ -128,22 +128,15 @@ function rText.Memory.Initialize()
     rText.Memory.CreateCache("renderTargets", {weakKeys = true})
     rText.Memory.CreateCache("textData", {weakKeys = true})
     
-    -- Add memory monitoring and cleanup
-    local function MonitorMemory()
-        local totalMem = collectgarbage("count")
-        if totalMem > rText.Config.Get("max_cache_size") then
-            -- Clear font cache
-            fontCache = setmetatable({}, {__mode = "v"})
-            fontCount = 0
-            
-            -- Force garbage collection
-            collectgarbage("collect")
-            
-            rText.Debug.Log("Memory cleanup performed")
+    -- Start monitoring
+    timer.Create("rText_MemoryMonitor", 1, 0, function()
+        rText.Memory.Stats.totalMemory = collectgarbage("count") * 1024
+        
+        -- Log memory usage in debug mode
+        if rText.Config.Cache.debugMode then
+            rText.Debug.Log("Memory usage:", string.NiceSize(rText.Memory.Stats.totalMemory))
         end
-    end
-    
-    timer.Create("rText_MemoryMonitor", rText.Config.Get("cache_cleanup_interval"), 0, MonitorMemory)
+    end)
 end
 
 -- Cleanup on shutdown

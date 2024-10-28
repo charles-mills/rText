@@ -86,10 +86,10 @@ function rText.Network.SanitizeData(data)
         if type(line) ~= "table" then continue end
         
         sanitized.lines[i] = {
-            text = string.sub(tostring(line.text or ""), 1, rText.Config.Get("max_text_length")),
+            text = string.sub(tostring(line.text or ""), 1, rText.Config.Cache.maxTextLength),
             size = math.Clamp(tonumber(line.size) or 30, 10, 100),
             color = IsColor(line.color) and line.color or Color(255, 255, 255),
-            font = rText.Config.Get("allowed_fonts")[line.font] and line.font or "Roboto",
+            font = rText.Config.Cache.allowedFonts[line.font] and line.font or "Roboto",
             rainbow = tobool(line.rainbow) and 1 or 0
         }
     end
