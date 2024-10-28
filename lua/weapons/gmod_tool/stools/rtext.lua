@@ -1,3 +1,4 @@
+TOOL = TOOL or {}
 TOOL.Category = "rlib"
 TOOL.Name = "rText"
 TOOL.Command = nil
@@ -30,7 +31,7 @@ if CLIENT then
 end
 
 -- Default configuration
-TOOL.Config = {
+local Config = {
     max_distance = 2000,
     max_lines = 8,
     max_chars = 128,
@@ -42,6 +43,8 @@ TOOL.Config = {
         ["DermaLarge"] = true
     }
 }
+
+TOOL.Config = Config
 
 local function GetPlayerSettings(ply)
     local settings = {
@@ -72,7 +75,7 @@ local function CreateTextScreen(ply, tr, ang)
         -- Spawn limit check
         local count = 0
         for _, ent in ipairs(ents.FindByClass("rtext_screen")) do
-            if ent:CPPIGetOwner() == ply then
+            if IsValid(ent:GetCreator()) and ent:GetCreator() == ply then
                 count = count + 1
             end
         end
@@ -109,8 +112,29 @@ function TOOL:LeftClick(tr)
     if CLIENT then return true end
     
     local ang = tr.HitNormal:Angle()
-    ang:RotateAroundAxis(ang:Right(), 90)
-    ang:RotateAroundAxis(ang:Up(), 90)
+    local ply = self:GetOwner()
+    
+    -- If it's a wall (roughly vertical surface)
+    if math.abs(tr.HitNormal.z) < 0.1 then
+        -- Get player's view angle for rotation
+        local plyAng = ply:GetAngles()
+        
+        -- Start with surface normal angle
+        ang = tr.HitNormal:Angle()
+        
+        -- Rotate to face outward from wall
+        ang:RotateAroundAxis(ang:Right(), -90)
+        
+        -- Make text upright based on player view
+        local _, plyRotation = plyAng:Forward():Angle():Forward():Angle()
+        ang:RotateAroundAxis(tr.HitNormal, -plyRotation.y + 90)
+    else
+        -- If it's a floor/ceiling
+        ang:RotateAroundAxis(ang:Right(), 90)
+        -- Rotate based on player view
+        local plyAng = ply:GetAngles()
+        ang:RotateAroundAxis(ang:Up(), plyAng.y - 90)
+    end
 
     local textScreen = CreateTextScreen(self:GetOwner(), tr, ang)
     if not IsValid(textScreen) then return false end
@@ -156,7 +180,8 @@ function TOOL:Reload(tr)
     return true
 end
 
-function TOOL.BuildCPanel(panel)
+local function BuildPanel(panel)
+    if not IsValid(panel) then return end
     panel:ClearControls()
 
     -- Add header
@@ -165,17 +190,17 @@ function TOOL.BuildCPanel(panel)
     })
 
     -- Text input for each line
-    for i = 1, 8 do
+    for i = 1, Config.max_lines do
         panel:AddControl("TextBox", {
             Label = "Line " .. i,
             Command = "rtext_line" .. i,
-            MaxLength = TOOL.Config.max_chars
+            MaxLength = Config.max_chars
         })
     end
 
     -- Font selector
     local fontCombo = panel:ComboBox("Font", "rtext_font")
-    for font in pairs(TOOL.Config.allowed_fonts) do
+    for font in pairs(Config.allowed_fonts) do
         fontCombo:AddChoice(font)
     end
 
@@ -201,4 +226,8 @@ function TOOL.BuildCPanel(panel)
         Label = "Permanent Screen",
         Command = "rtext_permanent"
     })
+end
+
+function TOOL.BuildCPanel(panel)
+    BuildPanel(panel)
 end

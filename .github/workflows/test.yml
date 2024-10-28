@@ -1,0 +1,14 @@
+name: GLuaTest
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  test:
+    uses: CFC-Servers/GLuaTest/.github/workflows/run_tests.yml@main
+    with:
+      timeout: 5
