@@ -69,9 +69,8 @@ end
 function ENT:UpdateText(ply, data, skipRateLimit)
     if not IsValid(ply) or not self:CanModify(ply) then return end
     
-    -- Skip rate limit check for initial settings
     if not skipRateLimit then
-        local canUpdate, message = rText.CanPlayerUpdate(ply)
+        local canUpdate, message = rText.Core.RateLimiter:Check(ply, rText.Config.Get("network_rate"))
         if not canUpdate then
             ply:ChatPrint(message)
             return
@@ -79,55 +78,31 @@ function ENT:UpdateText(ply, data, skipRateLimit)
     end
 
     local newData = {}
-    local maxLines = rText.Config.Cache.maxLines or 8
+    local maxLines = rText.Config.Get("max_lines")
     local lineCount = 0
     
+    -- Store global settings at root level
+    newData.spacing = math.Clamp(data.spacing or 1, 
+        rText.Config.Get("min_line_spacing"), 
+        rText.Config.Get("max_line_spacing"))
+    newData.align = data.align or "center"
+    
     -- Convert the flat data structure to line-based structure
-    for i = 1, 8 do
-        if lineCount >= maxLines then break end
-        
+    for i = 1, maxLines do
         if data.lines[i] and data.lines[i].text ~= "" then
             lineCount = lineCount + 1
+            
             table.insert(newData, {
-                text = string.sub(data.lines[i].text, 1, rText.Config.Cache.maxTextLength),
+                text = string.sub(data.lines[i].text, 1, rText.Config.Get("max_text_length")),
                 size = data.lines[i].size or 30,
                 color = data.color,
                 font = data.font,
                 rainbow = data.rainbow and 1 or 0,
-                effect = data.effect,
-                effect_speed = data.effect_speed,
                 glow = data.glow,
                 outline = data.outline,
                 three_d = data.three_d,
-                align = data.align,
-                spacing = data.spacing
+                align = data.align
             })
-        end
-    end
-    
-    -- Respect feature toggles
-    if not rText.Config.Cache.effectsEnabled then
-        data.effect = "none"
-    end
-
-    if not rText.Config.Cache.rainbowEnabled then
-        data.rainbow = false
-    end
-
-    -- Handle permanent flag
-    local isPermanent = false
-    if rText.Config.Cache.permanentEnabled then
-        isPermanent = data.permanent or false
-    end
-    
-    -- Set networked variables
-    self:SetPermanent(isPermanent)
-    
-    -- Sanitize and limit text
-    for i, line in pairs(data.lines) do
-        if line.text then
-            line.text = SanitizeText(line.text)
-            line.text = string.sub(line.text, 1, rText.Config.Cache.maxTextLength)
         end
     end
     
@@ -146,7 +121,7 @@ end
 
 -- Update cleanup hooks to respect permanent flag
 hook.Add("PlayerDisconnected", "rText_CleanupDisconnected", function(ply)
-    if not rText.Config.Cache.cleanupDisconnected then return end
+    if not rText.Config.Get("cleanup_disconnected") then return end
     
     for _, ent in ipairs(ents.FindByClass("rtext_screen")) do
         if IsValid(ent) and ent:GetCreator() == ply and not ent:GetPermanent() then
@@ -156,7 +131,7 @@ hook.Add("PlayerDisconnected", "rText_CleanupDisconnected", function(ply)
 end)
 
 hook.Add("PostCleanupMap", "rText_CleanupRounds", function()
-    if not rText.Config.Cache.cleanupRounds then return end
+    if not rText.Config.Get("cleanup_rounds") then return end
     
     for _, ent in ipairs(ents.FindByClass("rtext_screen")) do
         if IsValid(ent) and not ent:GetPermanent() then

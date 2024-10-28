@@ -1,7 +1,7 @@
 include("shared.lua")
 
--- TODO:
--- Fix text alignment
+-- Remove effects references
+rText = rText or {}
 
 -- Cached ConVars for performance
 local render_range = CreateClientConVar("rtext_render_range", 2000, true, false, "Maximum render distance for text screens")
@@ -11,16 +11,10 @@ cvars.AddChangeCallback("rtext_render_range", function(_, _, new)
     render_range_sqr = tonumber(new) ^ 2
 end)
 
--- Cache LocalPlayer for performance
-local LocalPlayer = LocalPlayer
-
 -- Cache frequently used functions
 local surface_SetFont = surface.SetFont
 local surface_SetTextColor = surface.SetTextColor
 local draw_SimpleText = draw.SimpleText
-local math_sin = math.sin
-local math_cos = math.cos
-local math_abs = math.abs
 local CurTime = CurTime
 local HSVToColor = HSVToColor
 
@@ -31,7 +25,7 @@ local fontCache = setmetatable({}, {
 local MAX_CACHED_FONTS = 50
 local fontCount = 0
 
--- Create a custom font based on size with caching limits
+-- Create a custom font based on size
 local function CreateFont(name, size)
     local fontName = string.format("rText_%s_%d", name, size)
     
@@ -57,28 +51,6 @@ local function CreateFont(name, size)
     return fontName
 end
 
--- Optimized effect calculations
-local effectFuncs = {
-    pulse = function(time)
-        return 0, math_sin(time * 2) * 2
-    end,
-    wave = function(time, i)
-        return math_sin(time + i) * 10, math_cos(time + i) * 5
-    end,
-    bounce = function(time)
-        return 0, math_abs(math_sin(time)) * 10
-    end,
-    typewriter = function(time, _, text)
-        local visible = math.floor((time % (#text + 2)) * 2)
-        return 0, 0, visible
-    end
-}
-
-local function GetEffectOffset(effect, i, line)
-    if not effectFuncs[effect] then return 0, 0 end
-    return effectFuncs[effect](CurTime() * (line.effect_speed or 1), i, line.text)
-end
-
 -- Cached rainbow color calculation
 local rainbowCache = {}
 local RAINBOW_CACHE_TIME = 0.1
@@ -99,14 +71,12 @@ function ENT:Initialize()
     self:SetMaterial("models/effects/vol_light001")
     self:SetRenderMode(RENDERMODE_NONE)
     self.TextData = {}
-    self.LastUpdate = 0
     
     net.Start("rText_RequestUpdate")
         net.WriteEntity(self)
     net.SendToServer()
 end
 
--- Optimized draw function with distance checks
 function ENT:Draw()
     if not self.TextData or #self.TextData == 0 then return end
     
@@ -116,40 +86,43 @@ function ENT:Draw()
     if dist > render_range_sqr then return end
     
     local ang = self:GetAngles()
+    
     cam.Start3D2D(pos + ang:Forward() * 0.1, ang, 0.25)
+    xpcall(function()
         self:DrawText()
+    end, function(err)
+        print("[rText] Render Error:", err)
+    end)
     cam.End3D2D()
 end
 
--- Optimized text drawing with error prevention
 function ENT:DrawText()
     if not self.TextData or #self.TextData == 0 then return end
     
     local totalHeight = 0
-    local spacing = self.TextData.spacing or 1
+    local spacing = self.TextData.spacing or 1 -- Get spacing from root level
     local maxWidth = 0
     
-    -- Pre-calculate heights and find max width
+    -- Calculate total height and max width
     for _, line in ipairs(self.TextData) do
         if not line or not line.text then continue end
-        surface_SetFont(CreateFont(line.font or "Roboto", line.size or 30))
+        
+        local font = CreateFont(line.font or "Roboto", line.size or 30)
+        surface.SetFont(font)
         local w, h = surface.GetTextSize(line.text)
-        totalHeight = totalHeight + h * spacing
+        totalHeight = totalHeight + (h * spacing) -- Apply spacing to height calculation
         maxWidth = math.max(maxWidth, w)
     end
     
     local y = -totalHeight / 2
     
-    -- Draw each line with optimized rendering
+    -- Draw each line
     for i, line in ipairs(self.TextData) do
         if not line or not line.text then continue end
         
         local font = CreateFont(line.font or "Roboto", line.size or 30)
-        surface_SetFont(font)
+        surface.SetFont(font)
         local w, h = surface.GetTextSize(line.text)
-        
-        local color = line.rainbow == 1 and GetRainbowColor(i) or line.color
-        local xOffset, yOffset, visibleChars = GetEffectOffset(line.effect, i, line)
         
         -- Calculate x position based on alignment
         local x = 0
@@ -161,60 +134,55 @@ function ENT:DrawText()
             x = maxWidth/2
         end
         
-        x = x + xOffset
+        -- Draw text with current settings
+        local color = line.rainbow == 1 and GetRainbowColor(i) or line.color
         
-        -- Draw text with effects
-        if line.outline then
-            local outlineColor = Color(0, 0, 0, color.a)
-            for ox = -1, 1 do
-                for oy = -1, 1 do
-                    if ox == 0 and oy == 0 then continue end
-                    draw_SimpleText(
-                        line.text,
-                        font,
-                        x + ox,
-                        y + yOffset + oy,
-                        outlineColor,
-                        align == "center" and TEXT_ALIGN_CENTER or align == "left" and TEXT_ALIGN_LEFT or TEXT_ALIGN_RIGHT,
-                        TEXT_ALIGN_TOP
-                    )
-                end
-            end
-        end
-        
-        -- Draw main text
-        local displayText = visibleChars and string.sub(line.text, 1, visibleChars) or line.text
         draw_SimpleText(
-            displayText,
+            line.text,
             font,
             x,
-            y + yOffset,
+            y,
             color,
-            align == "center" and TEXT_ALIGN_CENTER or align == "left" and TEXT_ALIGN_LEFT or TEXT_ALIGN_RIGHT,
+            align == "right" and TEXT_ALIGN_RIGHT or align == "left" and TEXT_ALIGN_LEFT or TEXT_ALIGN_CENTER,
             TEXT_ALIGN_TOP
         )
         
-        y = y + h * spacing
+        y = y + (h * spacing) -- Apply spacing to line positioning
     end
 end
 
--- Optimized network handling
 net.Receive("rText_Update", function()
     local ent = net.ReadEntity()
     if not IsValid(ent) then return end
     
-    ent.TextData = net.ReadTable()
-    ent.LastUpdate = CurTime()
+    -- Use pcall to safely read the table
+    local success, data = pcall(function()
+        return net.ReadTable()
+    end)
+    
+    if not success then
+        -- Use print as fallback if Debug isn't available
+        local errorMsg = "[rText] Failed to read network data: " .. tostring(data)
+        if rText and rText.Debug then
+            rText.Debug.Log(errorMsg)
+        else
+            print(errorMsg)
+        end
+        return
+    end
+    
+    -- Validate data before applying
+    if type(data) == "table" then
+        ent.TextData = data
+    end
 end)
 
--- Add to font cache system
-local function CleanupFontCache()
+-- Memory cleanup
+timer.Create("rText_MemoryCheck", 30, 0, function()
     local totalMem = collectgarbage("count")
     if totalMem > 50000 then -- 50MB limit
         fontCache = setmetatable({}, {__mode = "v"})
         fontCount = 0
         collectgarbage("collect")
     end
-end
-
-timer.Create("rText_MemoryCheck", 30, 0, CleanupFontCache)
+end)

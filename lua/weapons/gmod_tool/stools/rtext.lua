@@ -29,8 +29,6 @@ if CLIENT then
     CreateClientConVar("rtext_rainbow", "0", true, true)
     CreateClientConVar("rtext_permanent", "0", true, true)
     -- Effect convars
-    CreateClientConVar("rtext_effect", "none", true, true)
-    CreateClientConVar("rtext_effect_speed", "1", true, true)
     CreateClientConVar("rtext_glow", "0", true, true)
     CreateClientConVar("rtext_outline", "0", true, true)
     CreateClientConVar("rtext_3d", "0", true, true)
@@ -41,6 +39,201 @@ if CLIENT then
     for i = 1, 8 do
         CreateClientConVar("rtext_line" .. i .. "_size", "30", true, true)
     end
+
+    -- Font cache for preview
+    local fontCache = {}
+    local function CreatePreviewFont(name, size)
+        local fontName = string.format("rText_preview_%s_%d", name, size)
+        
+        if not fontCache[fontName] then
+            surface.CreateFont(fontName, {
+                font = name,
+                size = size * 3,
+                weight = 500,
+                antialias = true,
+                extended = true
+            })
+            fontCache[fontName] = true
+        end
+        
+        return fontName
+    end
+
+    -- Preview system
+    local function DrawPreview()
+        local ply = LocalPlayer()
+        if not IsValid(ply) then return end
+        
+        local wep = ply:GetActiveWeapon()
+        if not IsValid(wep) or wep:GetClass() ~= "gmod_tool" or wep:GetMode() ~= "rtext" then 
+            return 
+        end
+
+        local tr = ply:GetEyeTrace()
+        if not tr.Hit then return end
+        
+        -- Calculate angle
+        local ang = tr.HitNormal:Angle()
+        if math.abs(tr.HitNormal.z) < 0.1 then
+            ang = tr.HitNormal:Angle()
+            ang:RotateAroundAxis(ang:Right(), -90)
+            local plyYaw = ply:GetAngles().y
+            local normalizedYaw = math.Round(plyYaw / 90) * 90
+            ang:RotateAroundAxis(tr.HitNormal, -normalizedYaw + 90)
+        else
+            ang:RotateAroundAxis(ang:Right(), 90)
+            local plyYaw = ply:GetAngles().y
+            local normalizedYaw = math.Round(plyYaw / 90) * 90
+            ang:RotateAroundAxis(ang:Up(), normalizedYaw - 90)
+        end
+
+        local pos = tr.HitPos + tr.HitNormal * 0.1
+
+        -- Draw preview text
+        cam.Start3D2D(pos, ang, 0.25)
+            local totalHeight = 0
+            local lines = {}
+            local spacing = GetConVar("rtext_spacing"):GetFloat()
+            local font = GetConVar("rtext_font"):GetString()
+            local previewOpacity = rText.Config.Get("preview_opacity") or 50
+            
+            -- Calculate total height first
+            for i = 1, 8 do
+                local text = GetConVar("rtext_line" .. i):GetString()
+                if text and text ~= "" then
+                    local size = GetConVar("rtext_line" .. i .. "_size"):GetInt()
+                    local fontName = CreatePreviewFont(font, size)
+                    surface.SetFont(fontName)
+                    local w, h = surface.GetTextSize(text)
+                    totalHeight = totalHeight + (h * spacing)
+                    
+                    table.insert(lines, {
+                        text = text,
+                        font = fontName,
+                        height = h,
+                        width = w,
+                        size = size
+                    })
+                end
+            end
+            
+            -- Draw from center
+            local y = -totalHeight / 2
+            
+            for i, line in ipairs(lines) do
+                local color = Color(
+                    GetConVar("rtext_color_r"):GetInt(),
+                    GetConVar("rtext_color_g"):GetInt(),
+                    GetConVar("rtext_color_b"):GetInt(),
+                    previewOpacity
+                )
+                
+                if GetConVar("rtext_rainbow"):GetBool() then
+                    local rainbow = HSVToColor((CurTime() * 50 + (i * 25)) % 360, 1, 1)
+                    color = Color(rainbow.r, rainbow.g, rainbow.b, previewOpacity)
+                end
+                
+                -- Draw outline if enabled
+                if GetConVar("rtext_outline"):GetBool() then
+                    local outlineColor = Color(0, 0, 0, previewOpacity)
+                    for ox = -1, 1 do
+                        for oy = -1, 1 do
+                            if ox == 0 and oy == 0 then continue end
+                            draw.SimpleText(
+                                line.text,
+                                line.font,
+                                ox,
+                                y + oy,
+                                outlineColor,
+                                TEXT_ALIGN_CENTER,
+                                TEXT_ALIGN_TOP
+                            )
+                        end
+                    end
+                end
+                
+                -- Draw glow if enabled
+                if GetConVar("rtext_glow"):GetBool() then
+                    local glowColor = Color(color.r, color.g, color.b, previewOpacity * 0.5)
+                    for r = 1, 3 do
+                        draw.SimpleText(
+                            line.text,
+                            line.font,
+                            r,
+                            y,
+                            glowColor,
+                            TEXT_ALIGN_CENTER,
+                            TEXT_ALIGN_TOP
+                        )
+                        draw.SimpleText(
+                            line.text,
+                            line.font,
+                            -r,
+                            y,
+                            glowColor,
+                            TEXT_ALIGN_CENTER,
+                            TEXT_ALIGN_TOP
+                        )
+                    end
+                end
+                
+                -- Draw main text
+                draw.SimpleText(
+                    line.text,
+                    line.font,
+                    0,
+                    y,
+                    color,
+                    TEXT_ALIGN_CENTER,
+                    TEXT_ALIGN_TOP
+                )
+                
+                y = y + (line.height * spacing)
+            end
+        cam.End3D2D()
+    end
+
+    -- Initialize preview system
+    hook.Add("Initialize", "rText_InitPreview", function()
+        hook.Add("PostDrawTranslucentRenderables", "rText_Preview", function(depth, skybox)
+            if skybox then return end
+            DrawPreview()
+        end)
+    end)
+
+    -- No need for Deploy/Holster/ToolSwitched hooks anymore
+    -- The preview will automatically show/hide based on weapon checks in DrawPreview
+end
+
+function TOOL:LeftClick(tr)
+    if CLIENT then return true end
+    
+    if not rText or not rText.Core then
+        ErrorNoHalt("[rText] Core systems not initialized!")
+        return false
+    end
+    
+    local ang = tr.HitNormal:Angle()
+    
+    -- If it's a wall (roughly vertical surface)
+    if math.abs(tr.HitNormal.z) < 0.1 then
+        ang = tr.HitNormal:Angle()
+        ang:RotateAroundAxis(ang:Right(), -90)
+        local plyYaw = self:GetOwner():GetAngles().y
+        local normalizedYaw = math.Round(plyYaw / 90) * 90
+        ang:RotateAroundAxis(tr.HitNormal, -normalizedYaw + 90)
+    else
+        -- If it's a floor/ceiling
+        ang:RotateAroundAxis(ang:Right(), 90)
+        local plyYaw = self:GetOwner():GetAngles().y
+        local normalizedYaw = math.Round(plyYaw / 90) * 90
+        ang:RotateAroundAxis(ang:Up(), normalizedYaw - 90)
+    end
+
+    local textScreen = rText.Core.CreateTextScreen(self:GetOwner(), tr, ang)
+    if not IsValid(textScreen) then return false end
+
+    return true
 end
 
 -- Default configuration
@@ -62,25 +255,23 @@ TOOL.Config = Config
 local function GetPlayerSettings(ply)
     local settings = {
         lines = {},
-        font = ply:GetInfo("rtext_font"),
         color = Color(
             ply:GetInfoNum("rtext_color_r", 255),
             ply:GetInfoNum("rtext_color_g", 255),
             ply:GetInfoNum("rtext_color_b", 255),
-            ply:GetInfoNum("rtext_color_a", 255)
+            255
         ),
+        font = ply:GetInfo("rtext_font"),
         rainbow = ply:GetInfoNum("rtext_rainbow", 0) == 1,
+        spacing = ply:GetInfoNum("rtext_spacing", 1),
         permanent = ply:GetInfoNum("rtext_permanent", 0) == 1,
-        effect = ply:GetInfo("rtext_effect"):lower(),
-        effect_speed = ply:GetInfoNum("rtext_effect_speed", 1),
         glow = ply:GetInfoNum("rtext_glow", 0) == 1,
         outline = ply:GetInfoNum("rtext_outline", 0) == 1,
         three_d = ply:GetInfoNum("rtext_3d", 0) == 1,
-        align = ply:GetInfo("rtext_align"):lower(),
-        spacing = ply:GetInfoNum("rtext_spacing", 1)
+        align = ply:GetInfo("rtext_align")
     }
-
-    -- Get text and size for each line, respecting max lines
+    
+    -- Get text and size for each line
     local maxLines = rText.Config.Cache.maxLines or 8
     for i = 1, maxLines do
         local text = ply:GetInfo("rtext_line" .. i)
@@ -91,78 +282,8 @@ local function GetPlayerSettings(ply)
             }
         end
     end
-
+    
     return settings
-end
-
-local function CreateTextScreen(ply, tr, ang)
-    if not IsValid(ply) or not tr.Hit then return end
-    
-    if SERVER then
-        -- Check if player can spawn (includes wait time check)
-        local canSpawn, message = rText.CanPlayerSpawn(ply)
-        if not canSpawn then
-            ply:ChatPrint(message)
-            return
-        end
-
-        -- Create the entity
-        local textScreen = ents.Create("rtext_screen")
-        if not IsValid(textScreen) then return end
-
-        textScreen:SetPos(tr.HitPos)
-        textScreen:SetAngles(ang)
-        textScreen:Spawn()
-        textScreen:SetCreator(ply)
-        
-        -- Apply initial settings, bypassing rate limit
-        textScreen:UpdateText(ply, GetPlayerSettings(ply), true)
-
-        -- Undo registration
-        undo.Create("rText Screen")
-            undo.AddEntity(textScreen)
-            undo.SetPlayer(ply)
-        undo.Finish()
-
-        return textScreen
-    end
-end
-
-function TOOL:LeftClick(tr)
-    if CLIENT then return true end
-    
-    local ang = tr.HitNormal:Angle()
-    local ply = self:GetOwner()
-    
-    -- If it's a wall (roughly vertical surface)
-    if math.abs(tr.HitNormal.z) < 0.1 then
-        -- Start with surface normal angle
-        ang = tr.HitNormal:Angle()
-        
-        -- Rotate to face outward from wall
-        ang:RotateAroundAxis(ang:Right(), -90)
-        
-        -- Get player's yaw and normalize it to 90-degree increments
-        local plyYaw = ply:GetAngles().y
-        local normalizedYaw = math.Round(plyYaw / 90) * 90
-        
-        -- Apply the normalized rotation
-        ang:RotateAroundAxis(tr.HitNormal, -normalizedYaw + 90)
-    else
-        -- If it's a floor/ceiling
-        ang:RotateAroundAxis(ang:Right(), 90)
-        
-        -- Normalize player's yaw to 90-degree increments
-        local plyYaw = ply:GetAngles().y
-        local normalizedYaw = math.Round(plyYaw / 90) * 90
-        
-        ang:RotateAroundAxis(ang:Up(), normalizedYaw - 90)
-    end
-
-    local textScreen = CreateTextScreen(self:GetOwner(), tr, ang)
-    if not IsValid(textScreen) then return false end
-
-    return true
 end
 
 function TOOL:RightClick(tr)
@@ -211,8 +332,6 @@ function TOOL:Reload(tr)
         ply:ConCommand("rtext_color_b " .. (data[1].color and data[1].color.b or 255))
         ply:ConCommand("rtext_color_a " .. (data[1].color and data[1].color.a or 255))
         ply:ConCommand("rtext_rainbow " .. (data[1].rainbow and "1" or "0"))
-        ply:ConCommand("rtext_effect " .. (data[1].effect or "none"))
-        ply:ConCommand("rtext_effect_speed " .. (data[1].effect_speed or "1"))
         ply:ConCommand("rtext_glow " .. (data[1].glow and "1" or "0"))
         ply:ConCommand("rtext_outline " .. (data[1].outline and "1" or "0"))
         ply:ConCommand("rtext_3d " .. (data[1].three_d and "1" or "0"))
@@ -302,32 +421,6 @@ local function BuildPanel(panel)
     end
     
     panel:AddItem(extraLines)
-
-    -- Text Effects Form
-    local effectsPanel = vgui.Create("DForm", panel)
-    effectsPanel:SetName("Text Effects")
-    effectsPanel:SetExpanded(false)
-    
-    -- Effect selector
-    local effectCombo = vgui.Create("DComboBox")
-    effectCombo:SetConVar("rtext_effect")
-    effectCombo:AddChoice("None")
-    effectCombo:AddChoice("Pulse")
-    effectCombo:AddChoice("Wave")
-    effectCombo:AddChoice("Bounce")
-    effectCombo:AddChoice("Typewriter")
-    effectsPanel:AddItem(effectCombo)
-    
-    -- Effect speed
-    local speedSlider = vgui.Create("DNumSlider")
-    speedSlider:SetConVar("rtext_effect_speed")
-    speedSlider:SetText("Effect Speed")
-    speedSlider:SetMin(0.1)
-    speedSlider:SetMax(5)
-    speedSlider:SetDecimals(2)
-    effectsPanel:AddItem(speedSlider)
-    
-    panel:AddItem(effectsPanel)
 
     -- Style Form
     local stylePanel = vgui.Create("DForm", panel)
