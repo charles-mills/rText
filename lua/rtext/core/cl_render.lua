@@ -28,33 +28,95 @@ rText.Render = {
     end,
 
     RenderText = function(text, font, x, y, color, effects, lineIndex)
+        -- Rainbow effect
         if effects.rainbow == 1 then
             local offset = lineIndex and (lineIndex * 0.5) or 0
             color = rText.Render.GetRainbowColorWithOffset(offset)
         end
 
+        -- Glow effect (improved)
         if effects.glow then
-            local glowColor = Color(color.r * 0.6, color.g * 0.6, color.b * 0.6, color.a * 0.4)
-            for i = 1, 8 do
-                local ang = math.rad(i * 45)
-                local ox = math.cos(ang) * 2
-                local oy = math.sin(ang) * 2
-                draw.SimpleText(text, font, x + ox, y + oy, glowColor, TEXT_ALIGN_CENTER)
+            local glowSize = 4
+            local glowSteps = 12
+            local glowColor = Color(color.r * 0.6, color.g * 0.6, color.b * 0.6, color.a * 0.3)
+            
+            -- Create smooth glow effect
+            for i = 1, glowSteps do
+                local angle = (i / glowSteps) * math.pi * 2
+                local intensity = 0.5 + math.sin(angle) * 0.5
+                local glowX = x + math.cos(angle) * glowSize
+                local glowY = y + math.sin(angle) * glowSize
+                
+                local thisGlowColor = Color(
+                    glowColor.r,
+                    glowColor.g,
+                    glowColor.b,
+                    glowColor.a * intensity
+                )
+                
+                draw.SimpleText(text, font, glowX, glowY, thisGlowColor, TEXT_ALIGN_CENTER)
             end
         end
 
+        -- Outline effect (improved)
         if effects.outline then
             local outlineColor = Color(0, 0, 0, color.a)
-            for i = -1, 1 do
-                for j = -1, 1 do
-                    if i ~= 0 or j ~= 0 then
-                        draw.SimpleText(text, font, x + i, y + j, outlineColor, TEXT_ALIGN_CENTER)
-                    end
+            local outlineSize = 1.5
+            
+            -- Outer outline (thicker)
+            for x_offset = -outlineSize, outlineSize, 0.5 do
+                for y_offset = -outlineSize, outlineSize, 0.5 do
+                    if x_offset == 0 and y_offset == 0 then continue end
+                    
+                    local distance = math.sqrt(x_offset * x_offset + y_offset * y_offset)
+                    local alpha = math.Clamp(1 - (distance / outlineSize), 0, 1)
+                    outlineColor.a = color.a * alpha
+                    
+                    draw.SimpleText(text, font, x + x_offset, y + y_offset, outlineColor, TEXT_ALIGN_CENTER)
                 end
+            end
+            
+            -- Inner outline (sharper)
+            outlineColor.a = color.a
+            for i = 0, 7 do
+                local angle = (i / 8) * math.pi * 2
+                local ox = math.cos(angle)
+                local oy = math.sin(angle)
+                draw.SimpleText(text, font, x + ox, y + oy, outlineColor, TEXT_ALIGN_CENTER)
             end
         end
 
-        -- Draw main text
+        -- 3D effect (improved)
+        if effects.three_d then
+            local depth = 4
+            local shadowSteps = 8
+            local baseAlpha = color.a * 0.7
+            
+            -- Create layered shadow effect
+            for i = 1, shadowSteps do
+                local shadowDepth = (i / shadowSteps) * depth
+                local shadowColor = Color(0, 0, 0, baseAlpha * (1 - (i / shadowSteps)))
+                
+                draw.SimpleText(text, font, 
+                    x - shadowDepth, 
+                    y - shadowDepth, 
+                    shadowColor, 
+                    TEXT_ALIGN_CENTER
+                )
+            end
+            
+            -- Add subtle color gradient to main text
+            local gradientColor = Color(
+                math.min(color.r * 1.2, 255),
+                math.min(color.g * 1.2, 255),
+                math.min(color.b * 1.2, 255),
+                color.a
+            )
+            
+            draw.SimpleText(text, font, x + 0.5, y + 0.5, gradientColor, TEXT_ALIGN_CENTER)
+        end
+
+        -- Main text (always drawn last)
         draw.SimpleText(text, font, x, y, color, TEXT_ALIGN_CENTER)
     end,
 
@@ -199,7 +261,7 @@ local renderQueue = {}
 local lastQueueProcess = 0
 local QUEUE_PROCESS_INTERVAL = 0.016 -- ~60fps
 
-local function ProcessRenderQueue()
+function rText.Render.ProcessRenderQueue()
     local curTime = CurTime()
     if curTime - lastQueueProcess < QUEUE_PROCESS_INTERVAL then return end
     lastQueueProcess = curTime
@@ -301,7 +363,7 @@ end
 
 -- Hook into rendering system
 hook.Add("PostDrawTranslucentRenderables", "rText_Render", function()
-    ProcessRenderQueue()
+    rText.Render.ProcessRenderQueue()
 end)
 
 -- Add entity to render queue

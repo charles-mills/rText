@@ -233,3 +233,17 @@ if SERVER then
         end
     end)
 end
+
+-- Add dynamic configuration validation
+function rText.Config.Validate(key, value)
+    local validators = {
+        max_text_length = function(v) return tonumber(v) and v >= 1 and v <= 512 end,
+        render_distance = function(v) return tonumber(v) and v >= 500 and v <= 5000 end,
+        max_lines = function(v) return tonumber(v) and v >= 1 and v <= 16 end
+    }
+    
+    if validators[key] then
+        return validators[key](value)
+    end
+    return true
+end

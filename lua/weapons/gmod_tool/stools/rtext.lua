@@ -190,6 +190,23 @@ if CLIENT then
                 
                 y = y + (line.height * spacing)
             end
+
+            -- Add 3D effect preview
+            if GetConVar("rtext_3d"):GetBool() then
+                local depth = 3
+                for i = 1, depth do
+                    local offset = ang:Forward() * (i * -0.1)
+                    cam.Start3D2D(pos + offset, ang, 0.25)
+                        -- Draw shadow layers
+                        DrawPreviewText(color.a * (1 - i/depth))
+                    cam.End3D2D()
+                end
+            end
+
+            -- Main preview
+            cam.Start3D2D(pos, ang, 0.25)
+                DrawPreviewText(color.a)
+            cam.End3D2D()
         cam.End3D2D()
     end
 

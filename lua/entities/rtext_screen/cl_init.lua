@@ -100,17 +100,17 @@ function ENT:DrawText()
     if not self.TextData or #self.TextData == 0 then return end
     
     local totalHeight = 0
-    local spacing = self.TextData.spacing or 1 -- Get spacing from root level
+    local spacing = self.TextData.spacing or 1
     local maxWidth = 0
     
     -- Calculate total height and max width
     for _, line in ipairs(self.TextData) do
         if not line or not line.text then continue end
         
-        local font = CreateFont(line.font or "Roboto", line.size or 30)
+        local font = rText.Fonts.Create(line.font or "Roboto", line.size or 30)
         surface.SetFont(font)
         local w, h = surface.GetTextSize(line.text)
-        totalHeight = totalHeight + (h * spacing) -- Apply spacing to height calculation
+        totalHeight = totalHeight + (h * spacing)
         maxWidth = math.max(maxWidth, w)
     end
     
@@ -120,7 +120,7 @@ function ENT:DrawText()
     for i, line in ipairs(self.TextData) do
         if not line or not line.text then continue end
         
-        local font = CreateFont(line.font or "Roboto", line.size or 30)
+        local font = rText.Fonts.Create(line.font or "Roboto", line.size or 30)
         surface.SetFont(font)
         local w, h = surface.GetTextSize(line.text)
         
@@ -134,20 +134,26 @@ function ENT:DrawText()
             x = maxWidth/2
         end
         
-        -- Draw text with current settings
-        local color = line.rainbow == 1 and GetRainbowColor(i) or line.color
+        -- Create effects table
+        local effects = {
+            rainbow = line.rainbow or 0,
+            glow = line.glow,
+            outline = line.outline,
+            three_d = line.three_d
+        }
         
-        draw_SimpleText(
+        -- Use the render system for effects
+        rText.Render.RenderText(
             line.text,
             font,
             x,
             y,
-            color,
-            align == "right" and TEXT_ALIGN_RIGHT or align == "left" and TEXT_ALIGN_LEFT or TEXT_ALIGN_CENTER,
-            TEXT_ALIGN_TOP
+            line.color or color_white,
+            effects,
+            i
         )
         
-        y = y + (h * spacing) -- Apply spacing to line positioning
+        y = y + (h * spacing)
     end
 end
 
