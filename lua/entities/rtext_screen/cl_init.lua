@@ -1,5 +1,8 @@
 include("shared.lua")
 
+-- TODO:
+-- Fix text alignment
+
 -- Cached ConVars for performance
 local render_range = CreateClientConVar("rtext_render_range", 2000, true, false, "Maximum render distance for text screens")
 local render_range_sqr = render_range:GetInt() ^ 2
@@ -124,13 +127,15 @@ function ENT:DrawText()
     
     local totalHeight = 0
     local spacing = self.TextData.spacing or 1
+    local maxWidth = 0
     
-    -- Pre-calculate heights
+    -- Pre-calculate heights and find max width
     for _, line in ipairs(self.TextData) do
         if not line or not line.text then continue end
         surface_SetFont(CreateFont(line.font or "Roboto", line.size or 30))
-        local _, h = surface.GetTextSize(line.text)
+        local w, h = surface.GetTextSize(line.text)
         totalHeight = totalHeight + h * spacing
+        maxWidth = math.max(maxWidth, w)
     end
     
     local y = -totalHeight / 2
@@ -146,15 +151,17 @@ function ENT:DrawText()
         local color = line.rainbow == 1 and GetRainbowColor(i) or line.color
         local xOffset, yOffset, visibleChars = GetEffectOffset(line.effect, i, line)
         
-        -- Optimized alignment calculation
-        local textAlign = TEXT_ALIGN_CENTER
-        if line.align == "left" then
-            textAlign = TEXT_ALIGN_LEFT
-            xOffset = xOffset - w/2
-        elseif line.align == "right" then
-            textAlign = TEXT_ALIGN_RIGHT
-            xOffset = xOffset + w/2
+        -- Calculate x position based on alignment
+        local x = 0
+        local align = line.align or "center"
+        
+        if align == "left" then
+            x = -maxWidth/2
+        elseif align == "right" then
+            x = maxWidth/2
         end
+        
+        x = x + xOffset
         
         -- Draw text with effects
         if line.outline then
@@ -162,14 +169,30 @@ function ENT:DrawText()
             for ox = -1, 1 do
                 for oy = -1, 1 do
                     if ox == 0 and oy == 0 then continue end
-                    draw_SimpleText(line.text, font, xOffset + ox, y + yOffset + oy, outlineColor, textAlign, TEXT_ALIGN_TOP)
+                    draw_SimpleText(
+                        line.text,
+                        font,
+                        x + ox,
+                        y + yOffset + oy,
+                        outlineColor,
+                        align == "center" and TEXT_ALIGN_CENTER or align == "left" and TEXT_ALIGN_LEFT or TEXT_ALIGN_RIGHT,
+                        TEXT_ALIGN_TOP
+                    )
                 end
             end
         end
         
         -- Draw main text
         local displayText = visibleChars and string.sub(line.text, 1, visibleChars) or line.text
-        draw_SimpleText(displayText, font, xOffset, y + yOffset, color, textAlign, TEXT_ALIGN_TOP)
+        draw_SimpleText(
+            displayText,
+            font,
+            x,
+            y + yOffset,
+            color,
+            align == "center" and TEXT_ALIGN_CENTER or align == "left" and TEXT_ALIGN_LEFT or TEXT_ALIGN_RIGHT,
+            TEXT_ALIGN_TOP
+        )
         
         y = y + h * spacing
     end
@@ -183,3 +206,15 @@ net.Receive("rText_Update", function()
     ent.TextData = net.ReadTable()
     ent.LastUpdate = CurTime()
 end)
+
+-- Add to font cache system
+local function CleanupFontCache()
+    local totalMem = collectgarbage("count")
+    if totalMem > 50000 then -- 50MB limit
+        fontCache = setmetatable({}, {__mode = "v"})
+        fontCount = 0
+        collectgarbage("collect")
+    end
+end
+
+timer.Create("rText_MemoryCheck", 30, 0, CleanupFontCache)

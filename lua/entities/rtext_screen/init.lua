@@ -6,6 +6,21 @@ include("shared.lua")
 util.AddNetworkString("rText_Update")
 util.AddNetworkString("rText_RequestUpdate")
 
+local function SanitizeText(text)
+    -- Remove control characters
+    text = string.gsub(text, "%c", "")
+    
+    -- Remove potential exploits
+    text = string.gsub(text, "%%", "%%")
+    text = string.gsub(text, "\n", "")
+    text = string.gsub(text, "\r", "")
+    
+    -- Remove non-printable characters
+    text = string.gsub(text, "[^%g%s]", "")
+    
+    return text
+end
+
 function ENT:Initialize()
     self:SetModel("models/hunter/plates/plate1x1.mdl")
     self:PhysicsInit(SOLID_VPHYSICS)
@@ -16,6 +31,9 @@ function ENT:Initialize()
     self:SetRenderMode(RENDERMODE_TRANSALPHA)
     self:SetMaterial("models/effects/vol_light001")
     self:DrawShadow(false)
+    
+    -- Prevent damage
+    self:SetCollisionGroup(COLLISION_GROUP_WORLD)
     
     -- Initialize default values
     self.TextData = {}
@@ -33,6 +51,8 @@ function ENT:Initialize()
     if IsValid(phys) then
         phys:Wake()
         phys:EnableMotion(false)
+        -- Set mass to very light to prevent damage
+        phys:SetMass(1)
     end
 end
 
@@ -94,31 +114,65 @@ function ENT:UpdateText(ply, data, skipRateLimit)
         data.rainbow = false
     end
 
-    if not rText.Config.Cache.permanentEnabled then
-        data.permanent = false
+    -- Handle permanent flag
+    local isPermanent = false
+    if rText.Config.Cache.permanentEnabled then
+        isPermanent = data.permanent or false
+    end
+    
+    -- Set networked variables
+    self:SetPermanent(isPermanent)
+    
+    -- Sanitize and limit text
+    for i, line in pairs(data.lines) do
+        if line.text then
+            line.text = SanitizeText(line.text)
+            line.text = string.sub(line.text, 1, rText.Config.Cache.maxTextLength)
+        end
     end
     
     self:SetLines(newData)
 end
 
--- Handle incoming update requests
-net.Receive("rText_RequestUpdate", function(_, ply)
-    local ent = net.ReadEntity()
-    if not IsValid(ent) or ent:GetClass() ~= "rtext_screen" then return end
+-- Add this function to check if screen is permanent
+function ENT:GetPermanent()
+    return self:GetNWBool("Permanent", false)
+end
+
+-- Add this function to set permanent status
+function ENT:SetPermanent(isPermanent)
+    self:SetNWBool("Permanent", isPermanent)
+end
+
+-- Update cleanup hooks to respect permanent flag
+hook.Add("PlayerDisconnected", "rText_CleanupDisconnected", function(ply)
+    if not rText.Config.Cache.cleanupDisconnected then return end
     
-    net.Start("rText_Update")
-        net.WriteEntity(ent)
-        net.WriteTable(ent.TextData or {})
-    net.Send(ply)
+    for _, ent in ipairs(ents.FindByClass("rtext_screen")) do
+        if IsValid(ent) and ent:GetCreator() == ply and not ent:GetPermanent() then
+            ent:Remove()
+        end
+    end
 end)
 
--- Persistence
+hook.Add("PostCleanupMap", "rText_CleanupRounds", function()
+    if not rText.Config.Cache.cleanupRounds then return end
+    
+    for _, ent in ipairs(ents.FindByClass("rtext_screen")) do
+        if IsValid(ent) and not ent:GetPermanent() then
+            ent:Remove()
+        end
+    end
+end)
+
+-- Update Save/Load to include permanent status
 function ENT:Save()
     local data = {
         TextData = self.TextData,
         Pos = self:GetPos(),
         Ang = self:GetAngles(),
-        Creator = IsValid(self:GetCreator()) and self:GetCreator():SteamID64() or nil
+        Creator = IsValid(self:GetCreator()) and self:GetCreator():SteamID64() or nil,
+        Permanent = self:GetPermanent()
     }
     return data
 end
@@ -127,6 +181,7 @@ function ENT:Load(data)
     self:SetPos(data.Pos)
     self:SetAngles(data.Ang)
     self.TextData = data.TextData
+    self:SetPermanent(data.Permanent or false)
     
     -- Network the loaded data to clients
     net.Start("rText_Update")
@@ -150,4 +205,23 @@ end
 -- Get the creator of the entity
 function ENT:GetCreator()
     return self:GetNWEntity("Creator")
+end
+
+function ENT:Think()
+    -- Remove if too many entities nearby
+    local nearby = ents.FindInSphere(self:GetPos(), 100)
+    local screenCount = 0
+    
+    for _, ent in ipairs(nearby) do
+        if ent:GetClass() == "rtext_screen" then
+            screenCount = screenCount + 1
+            if screenCount > 5 then -- Max 5 screens in close proximity
+                self:Remove()
+                return
+            end
+        end
+    end
+    
+    self:NextThink(CurTime() + 1)
+    return true
 end

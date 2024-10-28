@@ -30,6 +30,10 @@ local config = {
     
     -- Spawn Timing
     wait_time = CreateConVar("rtext_wait_time", "3", FCVAR_ARCHIVE + FCVAR_NOTIFY, "Time in seconds players must wait between placing text screens", 0, 30),
+    
+    -- Security Settings
+    max_updates_per_second = CreateConVar("rtext_max_updates_per_second", "10", FCVAR_ARCHIVE, "Maximum updates per second globally", 1, 100),
+    max_packet_size = CreateConVar("rtext_max_packet_size", "4096", FCVAR_ARCHIVE, "Maximum network packet size in bytes", 1024, 8192)
 }
 
 -- Cache configuration values
@@ -51,6 +55,8 @@ local function UpdateCache()
         cleanupDisconnected = config.cleanup_disconnected:GetBool(),
         cleanupRounds = config.cleanup_rounds:GetBool(),
         waitTime = config.wait_time:GetFloat(),
+        maxUpdatesPerSecond = config.max_updates_per_second:GetInt(),
+        maxPacketSize = config.max_packet_size:GetInt(),
     }
 end
 
@@ -155,6 +161,32 @@ function rText.CanPlayerUpdate(ply)
     return true
 end
 
+-- Network security wrapper
+local lastGlobalUpdate = 0
+local updateCount = 0
+
+function rText.SafeNetworking(data)
+    -- Check packet size
+    local size = util.TableToJSON(data):len()
+    if size > rText.Config.Cache.maxPacketSize then
+        return false, "Packet size too large"
+    end
+    
+    -- Global rate limiting
+    local curTime = CurTime()
+    if curTime - lastGlobalUpdate >= 1 then
+        lastGlobalUpdate = curTime
+        updateCount = 0
+    end
+    
+    updateCount = updateCount + 1
+    if updateCount > rText.Config.Cache.maxUpdatesPerSecond then
+        return false, "Too many updates"
+    end
+    
+    return true
+end
+
 -- Help command
 if SERVER then
     concommand.Add("rtext_help", function(ply)
@@ -239,4 +271,46 @@ if SERVER then
             return ""
         end
     end)
+end
+
+-- Add spam protection
+local spamProtection = {
+    warnings = {},
+    blocks = {},
+    maxWarnings = 3,
+    blockDuration = 300 -- 5 minutes
+}
+
+function rText.CheckSpam(ply)
+    if not IsValid(ply) then return false end
+    
+    local steamID = ply:SteamID64()
+    local curTime = CurTime()
+    
+    -- Check if player is blocked
+    if spamProtection.blocks[steamID] then
+        if curTime < spamProtection.blocks[steamID] then
+            return false, "You are temporarily blocked from using text screens"
+        else
+            spamProtection.blocks[steamID] = nil
+            spamProtection.warnings[steamID] = 0
+        end
+    end
+    
+    -- Check warnings
+    if spamProtection.warnings[steamID] and spamProtection.warnings[steamID] >= spamProtection.maxWarnings then
+        spamProtection.blocks[steamID] = curTime + spamProtection.blockDuration
+        return false, "Too many violations. You are blocked from using text screens"
+    end
+    
+    return true
+end
+
+function rText.AddWarning(ply, reason)
+    local steamID = ply:SteamID64()
+    spamProtection.warnings[steamID] = (spamProtection.warnings[steamID] or 0) + 1
+    ply:ChatPrint(string.format("Warning (%d/%d): %s", 
+        spamProtection.warnings[steamID],
+        spamProtection.maxWarnings,
+        reason))
 end
