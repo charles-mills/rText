@@ -40,7 +40,6 @@ end
 -- Server-specific files
 if SERVER then
     include("rtext/core/sv_network.lua")
-    include("autorun/server/rtext_persistence.lua")
 end
 
 -- Initialize core systems

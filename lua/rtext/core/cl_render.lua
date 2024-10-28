@@ -1,5 +1,76 @@
 rText = rText or {}
-rText.Render = {}
+rText.Render = {
+    -- Expose these functions to be used by the entity
+    Render3DText = function(text, font, pos, ang, color, effects, lineIndex)
+        if not text or not font then return end
+        
+        local up = ang:Up()
+        local right = ang:Right()
+        local forward = ang:Forward()
+
+        -- 3D effect depth
+        local depth = 2
+        if effects.three_d then
+            -- Draw shadow layers
+            for i = 1, depth do
+                local shadowColor = Color(0, 0, 0, (color.a or 255) * (1 - i/depth))
+                local offset = forward * (i * -0.1)
+                cam.Start3D2D(pos + offset, ang, 0.1)
+                    rText.Render.RenderText(text, font, 0, 0, shadowColor, effects, lineIndex)
+                cam.End3D2D()
+            end
+        end
+
+        -- Draw main text
+        cam.Start3D2D(pos, ang, 0.1)
+            rText.Render.RenderText(text, font, 0, 0, color, effects, lineIndex)
+        cam.End3D2D()
+    end,
+
+    RenderText = function(text, font, x, y, color, effects, lineIndex)
+        if effects.rainbow == 1 then
+            local offset = lineIndex and (lineIndex * 0.5) or 0
+            color = rText.Render.GetRainbowColorWithOffset(offset)
+        end
+
+        if effects.glow then
+            local glowColor = Color(color.r * 0.6, color.g * 0.6, color.b * 0.6, color.a * 0.4)
+            for i = 1, 8 do
+                local ang = math.rad(i * 45)
+                local ox = math.cos(ang) * 2
+                local oy = math.sin(ang) * 2
+                draw.SimpleText(text, font, x + ox, y + oy, glowColor, TEXT_ALIGN_CENTER)
+            end
+        end
+
+        if effects.outline then
+            local outlineColor = Color(0, 0, 0, color.a)
+            for i = -1, 1 do
+                for j = -1, 1 do
+                    if i ~= 0 or j ~= 0 then
+                        draw.SimpleText(text, font, x + i, y + j, outlineColor, TEXT_ALIGN_CENTER)
+                    end
+                end
+            end
+        end
+
+        -- Draw main text
+        draw.SimpleText(text, font, x, y, color, TEXT_ALIGN_CENTER)
+    end,
+
+    GetRainbowColorWithOffset = function(offset)
+        if not offset then return rainbowColor end
+        
+        local frequency = 0.5
+        local time = CurTime() * frequency + offset
+        
+        return Color(
+            math.sin(time) * 127 + 128,
+            math.sin(time + 2.094) * 127 + 128,
+            math.sin(time + 4.189) * 127 + 128
+        )
+    end
+}
 
 -- Cache frequently used functions
 local surface_SetFont = surface.SetFont
@@ -10,6 +81,7 @@ local draw_SimpleText = draw.SimpleText
 local math_Clamp = math.Clamp
 local CurTime = CurTime
 local HSVToColor = HSVToColor
+local Lerp = Lerp
 
 -- Render settings
 local RENDER_SETTINGS = {
@@ -26,44 +98,100 @@ local fontCount = 0
 local MAX_FONTS = 50
 
 local function CreateFont(name, size)
-    local fontName = string.format("rText_%s_%d", name, size)
-    
-    if not fontCache[fontName] then
-        if fontCount >= MAX_FONTS then
-            fontCache = setmetatable({}, {__mode = "v"})
-            fontCount = 0
-            collectgarbage("step", 100)
-        end
-        
-        surface.CreateFont(fontName, {
-            font = name,
-            size = math_Clamp(size, 10, 100) * 3,
-            weight = 500,
-            antialias = true,
-            extended = true
-        })
-        
-        fontCache[fontName] = true
-        fontCount = fontCount + 1
-    end
-    
-    return fontName
+    return rText.Fonts.Create(name, size)
 end
 
--- Rainbow color cache
-local rainbowCache = {}
-local RAINBOW_UPDATE_INTERVAL = 0.1
-local lastRainbowUpdate = 0
+-- Global rainbow color calculation
+local rainbowColor = Color(255, 0, 0)
+local function UpdateGlobalRainbow()
+    local frequency = 0.5 -- Lower = slower
+    local time = CurTime() * frequency
+    
+    -- Use smoother sine waves with better phase offsets
+    local r = math.sin(time) * 127 + 128
+    local g = math.sin(time + 2.094) * 127 + 128  -- 2.094 radians = 120 degrees
+    local b = math.sin(time + 4.189) * 127 + 128  -- 4.189 radians = 240 degrees
+    
+    -- Smooth color transitions
+    rainbowColor.r = Lerp(0.1, rainbowColor.r, r)
+    rainbowColor.g = Lerp(0.1, rainbowColor.g, g)
+    rainbowColor.b = Lerp(0.1, rainbowColor.b, b)
+end
 
-local function GetRainbowColor(i)
-    local curTime = CurTime()
-    if curTime - lastRainbowUpdate > RAINBOW_UPDATE_INTERVAL then
-        for j = 1, 8 do
-            rainbowCache[j] = HSVToColor((curTime * 60 + (j * 5)) % 360, 1, 1)
-        end
-        lastRainbowUpdate = curTime
+-- Update more frequently for smoother animation
+timer.Remove("rText_RainbowUpdate")
+timer.Create("rText_RainbowUpdate", 0.01, 0, UpdateGlobalRainbow)
+
+-- Add this helper function for getting rainbow colors with offset
+local function GetRainbowColorWithOffset(offset)
+    if not offset then return rainbowColor end
+    
+    local frequency = 0.5
+    local time = CurTime() * frequency + offset
+    
+    return Color(
+        math.sin(time) * 127 + 128,
+        math.sin(time + 2.094) * 127 + 128,
+        math.sin(time + 4.189) * 127 + 128
+    )
+end
+
+-- Render effects
+local function RenderText(text, font, x, y, color, effects, lineIndex)
+    if effects.rainbow == 1 then
+        -- Add slight offset based on line index for wave effect
+        local offset = lineIndex and (lineIndex * 0.5) or 0
+        color = GetRainbowColorWithOffset(offset)
     end
-    return rainbowCache[i] or rainbowCache[1]
+
+    if effects.glow then
+        local glowColor = Color(color.r * 0.6, color.g * 0.6, color.b * 0.6, color.a * 0.4)
+        for i = 1, 8 do
+            local ang = math.rad(i * 45)
+            local ox = math.cos(ang) * 2
+            local oy = math.sin(ang) * 2
+            draw.SimpleText(text, font, x + ox, y + oy, glowColor, TEXT_ALIGN_CENTER)
+        end
+    end
+
+    if effects.outline then
+        local outlineColor = Color(0, 0, 0, color.a)
+        for i = -1, 1 do
+            for j = -1, 1 do
+                if i ~= 0 or j ~= 0 then
+                    draw.SimpleText(text, font, x + i, y + j, outlineColor, TEXT_ALIGN_CENTER)
+                end
+            end
+        end
+    end
+
+    -- Draw main text
+    draw.SimpleText(text, font, x, y, color, TEXT_ALIGN_CENTER)
+end
+
+-- 3D effect rendering
+local function Render3DText(text, font, pos, ang, color, effects, scale)
+    local up = ang:Up()
+    local right = ang:Right()
+    local forward = ang:Forward()
+
+    -- 3D effect depth
+    local depth = 2
+    if effects.three_d then
+        -- Draw shadow layers
+        for i = 1, depth do
+            local shadowColor = Color(0, 0, 0, color.a * (1 - i/depth))
+            local offset = forward * (i * -0.1)
+            cam.Start3D2D(pos + offset, ang, scale)
+                RenderText(text, font, 0, 0, shadowColor, effects)
+            cam.End3D2D()
+        end
+    end
+
+    -- Draw main text
+    cam.Start3D2D(pos, ang, scale)
+        RenderText(text, font, 0, 0, color, effects)
+    cam.End3D2D()
 end
 
 -- Batch rendering system
@@ -180,4 +308,28 @@ end)
 function rText.Render.QueueEntity(ent)
     if not IsValid(ent) then return end
     renderQueue[ent] = true
+end
+
+-- At the top of the file, add font creation function
+rText.Fonts = rText.Fonts or {}
+
+function rText.Fonts.Create(name, size)
+    local fontName = string.format("rText_%s_%d", name, size)
+    
+    -- Check if font exists by trying to use it
+    local exists = pcall(function() 
+        surface.SetFont(fontName)
+    end)
+    
+    if not exists then
+        surface.CreateFont(fontName, {
+            font = name,
+            size = math.Clamp(size, 10, 100) * 3,
+            weight = 500,
+            antialias = true,
+            extended = true
+        })
+    end
+    
+    return fontName
 end
