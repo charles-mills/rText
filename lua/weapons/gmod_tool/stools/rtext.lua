@@ -116,24 +116,27 @@ function TOOL:LeftClick(tr)
     
     -- If it's a wall (roughly vertical surface)
     if math.abs(tr.HitNormal.z) < 0.1 then
-        -- Get player's view angle for rotation
-        local plyAng = ply:GetAngles()
-        
         -- Start with surface normal angle
         ang = tr.HitNormal:Angle()
         
         -- Rotate to face outward from wall
         ang:RotateAroundAxis(ang:Right(), -90)
         
-        -- Make text upright based on player view
-        local _, plyRotation = plyAng:Forward():Angle():Forward():Angle()
-        ang:RotateAroundAxis(tr.HitNormal, -plyRotation.y + 90)
+        -- Get player's yaw and normalize it to 90-degree increments
+        local plyYaw = ply:GetAngles().y
+        local normalizedYaw = math.Round(plyYaw / 90) * 90
+        
+        -- Apply the normalized rotation
+        ang:RotateAroundAxis(tr.HitNormal, -normalizedYaw + 90)
     else
         -- If it's a floor/ceiling
         ang:RotateAroundAxis(ang:Right(), 90)
-        -- Rotate based on player view
-        local plyAng = ply:GetAngles()
-        ang:RotateAroundAxis(ang:Up(), plyAng.y - 90)
+        
+        -- Normalize player's yaw to 90-degree increments
+        local plyYaw = ply:GetAngles().y
+        local normalizedYaw = math.Round(plyYaw / 90) * 90
+        
+        ang:RotateAroundAxis(ang:Up(), normalizedYaw - 90)
     end
 
     local textScreen = CreateTextScreen(self:GetOwner(), tr, ang)
